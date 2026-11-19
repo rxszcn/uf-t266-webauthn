@@ -4,7 +4,6 @@ import (
 	"crypto/subtle"
 	"fmt"
 	"net/url"
-	"strings"
 )
 
 // CollectedClientData represents the contextual bindings of both the WebAuthn Relying Party
@@ -269,17 +268,28 @@ const (
 // IsOriginInHaystack checks if the needle is in the haystack using the mechanism to determine origin equality defined
 // in HTML5 Section 5.3 and RFC3986 Section 6.2.1.
 //
-// Specifically if the needle value has the 'http://' or 'https://' prefix (case-insensitive) and can be parsed as a
-// URL; we check each item in the haystack to see if it matches the same rules, and then if the scheme and host (with
-// a normalized port) components match case-insensitively then they're considered a match.
+// Specifically if the needle value has the 'http://' or 'https://' prefix (case-insensitive) and can be parsed as an
+// absolute URL with a host, it is a tuple origin; both it and each item of the haystack which is one too are reduced to
+// their WHATWG tuple origin serialization, i.e. the lowercased scheme and host with the port omitted when it is the
+// default port of the scheme, and two values match when those serializations are equal. No two spellings of one origin
+// are treated differently by that: the brackets of an IPv6 address literal are part of the serialization of the host,
+// so 'https://[::1]:443' and 'https://[::1]' both serialize to 'https://[::1]' and match in either direction, in the
+// same way 'https://app.example.com:443' and 'https://app.example.com' already did.
 //
-// If the needle value does not have the 'http://' or 'https://' prefix (case-insensitive) or can't be parsed as a URL
-// equality is determined using simple string comparison.
+// If the needle value does not have the 'http://' or 'https://' prefix (case-insensitive) or isn't a tuple origin, for
+// example because it is not a URL at all, has no host, or has a port above 65535, equality is determined using simple
+// string comparison. The haystack is never matched by simple string comparison in that case, and a haystack value which
+// is not a tuple origin is not matched against a needle which is one, so an opaque origin is only ever compared with
+// [IsOpaqueOriginInHaystack].
 //
 // It is important to note that this function completely ignores Apple Associated Domains entirely as Apple is using
 // an unassigned Well-Known URI in breech of Well-Known Uniform Resource Identifiers (RFC8615).
 //
 // See (Origin Definition): https://www.w3.org/TR/2011/WD-html5-20110525/origin-0.html
+//
+// See (Tuple Origin Serialization): https://url.spec.whatwg.org/#origin
+//
+// See (Host Serialization): https://url.spec.whatwg.org/#host-serializing
 //
 // See (Simple String Comparison Definition): https://datatracker.ietf.org/doc/html/rfc3986#section-6.2.1
 //
@@ -289,21 +299,21 @@ const (
 //
 // See (Well-Known Uniform Resource Identifiers): https://datatracker.ietf.org/doc/html/rfc8615
 func IsOriginInHaystack(needle string, haystack []string) bool {
-	needleURI := parseOriginURI(needle)
+	needleOrigin, isTupleOrigin := tupleOriginSerialization(needle)
 
-	if needleURI != nil {
-		for _, hay := range haystack {
-			if hayURI := parseOriginURI(hay); hayURI != nil {
-				if isOriginEqual(needleURI, hayURI) {
-					return true
-				}
-			}
-		}
-	} else {
+	if !isTupleOrigin {
 		for _, hay := range haystack {
 			if needle == hay {
 				return true
 			}
+		}
+
+		return false
+	}
+
+	for _, hay := range haystack {
+		if hayOrigin, ok := tupleOriginSerialization(hay); ok && needleOrigin == hayOrigin {
+			return true
 		}
 	}
 
@@ -330,47 +340,24 @@ func IsOpaqueOriginInHaystack(needle string, haystack []string) bool {
 	return false
 }
 
-func isOriginEqual(a *url.URL, b *url.URL) bool {
-	if !strings.EqualFold(a.Scheme, b.Scheme) {
-		return false
+// tupleOriginSerialization returns the WHATWG serialization of the tuple origin a value conveys, i.e. of an absolute
+// http or https URL with a host, which is its scheme, the '//' that introduces the authority, its host and, when the
+// port is not the default port of the scheme, that port. It reports false, with no serialization, for a value which is
+// not such an origin: an origin a client conveys for a native application, a value which is not a URL at all, or one
+// which has no host or a port above 65535.
+//
+// The normalization is [relatedOriginNormalize], the same one the Related Origin Requests document is built with, so
+// that the two ends of a comparison cannot drift apart: a value is reduced to its scheme and host alone, with the
+// scheme and host lowercased, an empty port and the default port of the scheme removed, and the brackets of an IPv6
+// address literal kept as they are required to be by the host serializer.
+//
+// See (Tuple Origin Serialization): https://url.spec.whatwg.org/#origin
+//
+// See (Host Serialization): https://url.spec.whatwg.org/#host-serializing
+func tupleOriginSerialization(raw string) (serialized string, ok bool) {
+	if serialized, err := relatedOriginNormalize(raw); err == nil {
+		return serialized, true
 	}
 
-	if !strings.EqualFold(a.Host, b.Host) {
-		return false
-	}
-
-	return true
-}
-
-func parseOriginURI(raw string) *url.URL {
-	if !isPossibleFQDN(raw) {
-		return nil
-	}
-
-	// We can ignore the error here because it's effectively not a FQDN if this fails.
-	uri, _ := url.Parse(raw)
-
-	if uri == nil {
-		return nil
-	}
-
-	// Normalize the port if necessary.
-	switch uri.Scheme {
-	case "http":
-		if uri.Port() == "80" {
-			uri.Host = uri.Hostname()
-		}
-	case "https":
-		if uri.Port() == "443" {
-			uri.Host = uri.Hostname()
-		}
-	}
-
-	return uri
-}
-
-func isPossibleFQDN(raw string) bool {
-	normalized := strings.ToLower(raw)
-
-	return strings.HasPrefix(normalized, "http://") || strings.HasPrefix(normalized, "https://")
+	return "", false
 }

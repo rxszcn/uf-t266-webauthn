@@ -1399,6 +1399,7 @@ func TestBeginRegistrationOrigin(t *testing.T) {
 	testCases := []struct {
 		name            string
 		origin          string
+		rpOrigins       []string
 		rpOpaqueOrigins []string
 		expected        string
 		err             string
@@ -1418,6 +1419,32 @@ func TestBeginRegistrationOrigin(t *testing.T) {
 			expected: "https://b.example.com:443",
 		},
 		{
+			// The binding of a ceremony is compared with the configured origins by the same origin equality the
+			// ceremony response is verified with, so each spelling may be bound against the other.
+			name:      "ShouldBindAnIPv6OriginSpelledWithoutTheDefaultPortAgainstADefaultPortConfiguredOrigin",
+			origin:    "https://[2001:db8::1]",
+			rpOrigins: []string{"https://[2001:db8::1]:443"},
+			expected:  "https://[2001:db8::1]",
+		},
+		{
+			name:      "ShouldBindAnIPv6OriginSpelledWithTheDefaultPortAgainstANoPortConfiguredOrigin",
+			origin:    "https://[2001:db8::1]:443",
+			rpOrigins: []string{"https://[2001:db8::1]"},
+			expected:  "https://[2001:db8::1]:443",
+		},
+		{
+			name:      "ShouldBindAnIPv6OriginSpelledIdenticallyToTheConfiguredOrigin",
+			origin:    "https://[2001:db8::1]:443",
+			rpOrigins: []string{"https://[2001:db8::1]:443"},
+			expected:  "https://[2001:db8::1]:443",
+		},
+		{
+			name:      "ShouldRejectAnIPv6OriginWithANonDefaultPortWhichIsNotConfigured",
+			origin:    "https://[2001:db8::1]:8443",
+			rpOrigins: []string{"https://[2001:db8::1]"},
+			err:       "error generating credential creation: the ceremony origin 'https://[2001:db8::1]:8443' must be one of the origins in the 'RPOrigins' configuration",
+		},
+		{
 			name:   "ShouldRejectAnOriginWhichIsNotConfigured",
 			origin: "https://c.example.com",
 			err:    "error generating credential creation: the ceremony origin 'https://c.example.com' must be one of the origins in the 'RPOrigins' configuration",
@@ -1432,10 +1459,15 @@ func TestBeginRegistrationOrigin(t *testing.T) {
 
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
+			rpOrigins := tc.rpOrigins
+			if rpOrigins == nil {
+				rpOrigins = []string{"https://a.example.com", "https://b.example.com"}
+			}
+
 			w, err := New(&Config{
 				RPID:            "example.com",
 				RPDisplayName:   "Test",
-				RPOrigins:       []string{"https://a.example.com", "https://b.example.com"},
+				RPOrigins:       rpOrigins,
 				RPOpaqueOrigins: tc.rpOpaqueOrigins,
 			})
 			require.NoError(t, err)
@@ -1496,6 +1528,30 @@ func TestCreateCredentialBoundOrigin(t *testing.T) {
 			responseOrigin:  originOpaque,
 			sessionOrigin:   originVector,
 			rpOpaqueOrigins: []string{originOpaque},
+		},
+		{
+			// The ceremony was begun bound to one spelling of the IPv6 origin and the client reports the other.
+			// They are the same tuple origin, so the completion step accepts it, exactly as it does for the two
+			// spellings of an IPv4 origin.
+			name:           "ShouldAcceptTheBoundIPv6OriginReportedWithoutTheDefaultPort",
+			responseOrigin: "https://[2001:db8::1]",
+			sessionOrigin:  "https://[2001:db8::1]:443",
+		},
+		{
+			name:           "ShouldAcceptTheBoundIPv6OriginReportedWithTheDefaultPort",
+			responseOrigin: "https://[2001:db8::1]:443",
+			sessionOrigin:  "https://[2001:db8::1]",
+		},
+		{
+			name:           "ShouldAcceptTheBoundIPv6OriginSpelledIdentically",
+			responseOrigin: "https://[2001:db8::1]:443",
+			sessionOrigin:  "https://[2001:db8::1]:443",
+		},
+		{
+			name:           "ShouldRejectAnIPv6OriginWhichDiffersByANonDefaultPort",
+			responseOrigin: "https://[2001:db8::1]",
+			sessionOrigin:  "https://[2001:db8::1]:8443",
+			err:            "Error validating origin",
 		},
 	}
 

@@ -20,10 +20,14 @@ func TestVerifyCollectedClientData(t *testing.T) {
 		topOriginMode   TopOriginVerificationMode
 		allowCrossOrign bool
 		ceremony        CeremonyType
-		err             string
-		errType         string
-		errDetails      string
-		errInfo         string
+		// clientDataCeremony overrides the ceremony type recorded in the collected client data, so a case can
+		// present client data collected by the assertion ceremony to the assertion verification rather than the
+		// registration one the helper writes by default.
+		clientDataCeremony CeremonyType
+		err                string
+		errType            string
+		errDetails         string
+		errInfo            string
 	}{
 		{
 			name:            "ShouldSucceed",
@@ -226,6 +230,114 @@ func TestVerifyCollectedClientData(t *testing.T) {
 			errDetails:    "Error validating ceremony type",
 			errInfo:       fmt.Sprintf("Expected Value: %s, Received: %s", AssertCeremony, CreateCeremony),
 		},
+		{
+			// The four cells of the IPv6 cross-spelling matrix as the registration ceremony sees them: a client
+			// reports the serialization of the origin it is at, which for a plain https origin never carries the
+			// default port, while the Relying Party may have registered either spelling.
+			name:          "ShouldSucceedIPv6CrossSpellingRegistrationConfiguredNoPortReportedWithDefaultPort",
+			origin:        "https://[2001:db8::1]:443",
+			rpOrigins:     []string{"https://[2001:db8::1]"},
+			ceremony:      CreateCeremony,
+			topOriginMode: TopOriginExplicitVerificationMode,
+		},
+		{
+			name:          "ShouldSucceedIPv6CrossSpellingRegistrationConfiguredNoPortReportedWithoutPort",
+			origin:        "https://[2001:db8::1]",
+			rpOrigins:     []string{"https://[2001:db8::1]"},
+			ceremony:      CreateCeremony,
+			topOriginMode: TopOriginExplicitVerificationMode,
+		},
+		{
+			name:          "ShouldSucceedIPv6CrossSpellingRegistrationConfiguredDefaultPortReportedWithoutPort",
+			origin:        "https://[2001:db8::1]",
+			rpOrigins:     []string{"https://[2001:db8::1]:443"},
+			ceremony:      CreateCeremony,
+			topOriginMode: TopOriginExplicitVerificationMode,
+		},
+		{
+			name:          "ShouldSucceedIPv6CrossSpellingRegistrationConfiguredDefaultPortReportedWithDefaultPort",
+			origin:        "https://[2001:db8::1]:443",
+			rpOrigins:     []string{"https://[2001:db8::1]:443"},
+			ceremony:      CreateCeremony,
+			topOriginMode: TopOriginExplicitVerificationMode,
+		},
+		{
+			// The same four cells as the assertion ceremony sees them, i.e. the reverse direction of the matrix.
+			name:               "ShouldSucceedIPv6CrossSpellingAssertionConfiguredNoPortReportedWithDefaultPort",
+			origin:             "https://[2001:db8::1]:443",
+			rpOrigins:          []string{"https://[2001:db8::1]"},
+			ceremony:           AssertCeremony,
+			clientDataCeremony: AssertCeremony,
+			topOriginMode:      TopOriginExplicitVerificationMode,
+		},
+		{
+			name:               "ShouldSucceedIPv6CrossSpellingAssertionConfiguredNoPortReportedWithoutPort",
+			origin:             "https://[2001:db8::1]",
+			rpOrigins:          []string{"https://[2001:db8::1]"},
+			ceremony:           AssertCeremony,
+			clientDataCeremony: AssertCeremony,
+			topOriginMode:      TopOriginExplicitVerificationMode,
+		},
+		{
+			name:               "ShouldSucceedIPv6CrossSpellingAssertionConfiguredDefaultPortReportedWithoutPort",
+			origin:             "https://[2001:db8::1]",
+			rpOrigins:          []string{"https://[2001:db8::1]:443"},
+			ceremony:           AssertCeremony,
+			clientDataCeremony: AssertCeremony,
+			topOriginMode:      TopOriginExplicitVerificationMode,
+		},
+		{
+			name:               "ShouldSucceedIPv6CrossSpellingAssertionConfiguredDefaultPortReportedWithDefaultPort",
+			origin:             "https://[2001:db8::1]:443",
+			rpOrigins:          []string{"https://[2001:db8::1]:443"},
+			ceremony:           AssertCeremony,
+			clientDataCeremony: AssertCeremony,
+			topOriginMode:      TopOriginExplicitVerificationMode,
+		},
+		{
+			// The Top Origin is matched by the same origin equality, so the two spellings of an IPv6 origin are
+			// interchangeable there as well.
+			name:            "ShouldSucceedIPv6CrossSpellingTopOriginConfiguredNoPortReportedWithDefaultPort",
+			origin:          "https://[2001:db8::1]",
+			topOrigin:       "https://[2001:db8::2]:443",
+			crossOrigin:     true,
+			allowCrossOrign: true,
+			rpOrigins:       []string{"https://[2001:db8::1]"},
+			rpTopOrigins:    []string{"https://[2001:db8::2]"},
+			topOriginMode:   TopOriginExplicitVerificationMode,
+		},
+		{
+			name:            "ShouldSucceedIPv6CrossSpellingTopOriginConfiguredDefaultPortReportedWithoutPort",
+			origin:          "https://[2001:db8::1]",
+			topOrigin:       "https://[2001:db8::2]",
+			crossOrigin:     true,
+			allowCrossOrign: true,
+			rpOrigins:       []string{"https://[2001:db8::1]"},
+			rpTopOrigins:    []string{"https://[2001:db8::2]:443"},
+			topOriginMode:   TopOriginExplicitVerificationMode,
+		},
+		{
+			// The regression control: a source with a port which is not the default port of the scheme is
+			// intermixed by its serialization, so the ceremony fails exactly as it did before.
+			name:          "ShouldFailIPv6NonDefaultPortReportedWithoutPort",
+			origin:        "https://[2001:db8::1]",
+			rpOrigins:     []string{"https://[2001:db8::1]:8443"},
+			ceremony:      CreateCeremony,
+			topOriginMode: TopOriginExplicitVerificationMode,
+			errType:       "verification_error",
+			errDetails:    "Error validating origin",
+			errInfo:       "Expected Values: [https://[2001:db8::1]:8443], Received: https://[2001:db8::1]",
+		},
+		{
+			name:          "ShouldFailIPv4NonDefaultPortReportedWithoutPort",
+			origin:        "https://app.example.com",
+			rpOrigins:     []string{"https://app.example.com:8443"},
+			ceremony:      CreateCeremony,
+			topOriginMode: TopOriginExplicitVerificationMode,
+			errType:       "verification_error",
+			errDetails:    "Error validating origin",
+			errInfo:       "Expected Values: [https://app.example.com:8443], Received: https://app.example.com",
+		},
 	}
 
 	for _, tc := range testCases {
@@ -234,6 +346,10 @@ func TestVerifyCollectedClientData(t *testing.T) {
 			require.NoError(t, err)
 
 			ccd := setupCollectedClientData(challenge, tc.origin, tc.topOrigin, tc.crossOrigin)
+
+			if tc.clientDataCeremony != "" {
+				ccd.Type = tc.clientDataCeremony
+			}
 
 			rpOrigins := tc.rpOrigins
 			if rpOrigins == nil {
@@ -511,9 +627,130 @@ func TestIsOriginInHaystack(t *testing.T) {
 			true,
 		},
 		{
+			// The four cells of the IPv6 cross-spelling matrix. The default port of the scheme is not part of the
+			// serialization of an origin, and the brackets of an IPv6 address literal are, so every one of the four
+			// spellings is one of only two serializations and each pair which shares one matches in either direction.
+			"ShouldHandleIPv6CrossSpellingNoPortConfiguredReportedWithDefaultPort",
+			"https://[2001:db8::1]:443",
+			[]string{"https://[2001:db8::1]"},
+			true,
+		},
+		{
+			"ShouldHandleIPv6CrossSpellingNoPortConfiguredReportedWithoutPort",
+			"https://[2001:db8::1]",
+			[]string{"https://[2001:db8::1]"},
+			true,
+		},
+		{
+			"ShouldHandleIPv6CrossSpellingDefaultPortConfiguredReportedWithoutPort",
+			"https://[2001:db8::1]",
+			[]string{"https://[2001:db8::1]:443"},
+			true,
+		},
+		{
+			"ShouldHandleIPv6CrossSpellingDefaultPortConfiguredReportedWithDefaultPort",
+			"https://[2001:db8::1]:443",
+			[]string{"https://[2001:db8::1]:443"},
+			true,
+		},
+		{
+			"ShouldHandleIPv6CrossSpellingLoopback",
+			"https://[::1]",
+			[]string{"https://[::1]:443"},
+			true,
+		},
+		{
+			// A source which carries a port other than the default port of the scheme keeps that port in its
+			// serialization, so the two spellings of it are the same value only while they are spelled the same.
+			"ShouldHandleIPv6NonDefaultPortSameSpelling",
+			"https://[2001:db8::1]:8443",
+			[]string{"https://[2001:db8::1]:8443"},
+			true,
+		},
+		{
+			"ShouldHandleIPv6NonDefaultPortAgainstNoPort",
+			"https://[2001:db8::1]:8443",
+			[]string{"https://[2001:db8::1]"},
+			false,
+		},
+		{
+			"ShouldHandleIPv6DifferentNonDefaultPorts",
+			"https://[2001:db8::1]:8443",
+			[]string{"https://[2001:db8::1]:9443"},
+			false,
+		},
+		{
+			// The default port of the other scheme is an explicit port of this one.
+			"ShouldHandleIPv6PortNotMatchingScheme",
+			"https://[2001:db8::1]:80",
+			[]string{"https://[2001:db8::1]"},
+			false,
+		},
+		{
+			"ShouldHandleIPv6CaseInsensitiveSchemeAndHost",
+			"HTTPS://[2001:DB8::1]:443",
+			[]string{"https://[2001:db8::1]"},
+			true,
+		},
+		{
+			// The IPv4 control group: the same footgun was absent here because an IPv4 host has no brackets to lose,
+			// and its two spellings have to keep behaving exactly as they did.
+			"ShouldHandleFullyQualifiedOriginNonDefaultPortAgainstNoPort",
+			"https://app.example.com:8443",
+			[]string{"https://app.example.com"},
+			false,
+		},
+		{
+			"ShouldHandleFullyQualifiedOriginNonDefaultPortSameSpelling",
+			"https://app.example.com:8443",
+			[]string{"https://app.example.com:8443"},
+			true,
+		},
+		{
+			"ShouldHandleFullyQualifiedOriginCaseInsensitiveSchemeAndHostWithDefaultPort",
+			"HTTPS://APP.EXAMPLE.COM:443",
+			[]string{"https://app.example.com"},
+			true,
+		},
+		{
 			"ShouldHandleInvalidURLAsSimpleStringMatch",
 			"http://app.example.%%%&123?1",
 			[]string{"http://app.example.%%%&123?1"},
+			true,
+		},
+		{
+			// A haystack value which is not a tuple origin is never matched against a needle which is one, even when
+			// the two are spelled identically and differ only in case, because the needle is compared by origin
+			// equality and a value with no host has no origin to compare with.
+			"ShouldNotSimpleMatchAHostlessHTTPSValueAgainstATupleOriginNeedle",
+			"https://[2001:db8::1]",
+			[]string{"https://"},
+			false,
+		},
+		{
+			"ShouldNotMatchADifferentHostOfTheSameShape",
+			"https://[2001:db8::2]",
+			[]string{"https://[2001:db8::1]"},
+			false,
+		},
+		{
+			// A value which is opaque per [IsOpaqueOrigin] is compared byte for byte here too, i.e. with none of the
+			// leniency an origin with a host is matched with, whichever side of the comparison it is on.
+			"ShouldNotCaseFoldAHostlessHTTPSValue",
+			"https://",
+			[]string{"HTTPS://"},
+			false,
+		},
+		{
+			"ShouldNotNormalizeThePortOfAnOutOfRangeHTTPSValue",
+			"https://example.com:99999",
+			[]string{"https://Example.com:99999"},
+			false,
+		},
+		{
+			"ShouldMatchAnOutOfRangeHTTPSValueExactly",
+			"https://example.com:99999",
+			[]string{"https://example.com:99999"},
 			true,
 		},
 	}
